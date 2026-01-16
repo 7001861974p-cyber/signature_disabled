@@ -1,0 +1,78 @@
+name: Raphael Kernel Build @XdaAbhi (No Module Signature)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf libncurses5-dev libssl-dev libelf-dev \
+            lzop python3 rsync unzip zip zstd
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          max-size: 2G
+
+      # ---- Step 1: Patch defconfigs (both) ----
+      - name: Disable module signature in defconfig
+        run: |
+          for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
+            if [ -f "$f" ]; then
+              echo "Patching $f"
+              sed -i '/CONFIG_MODULE_SIG/d' $f
+              sed -i '/CONFIG_MODULE_SIG_FORCE/d' $f
+              sed -i '/CONFIG_MODULE_SIG_ALL/d' $f
+              echo "# CONFIG_MODULE_SIG is not set" >> $f
+              echo "# CONFIG_MODULE_SIG_FORCE is not set" >> $f
+              echo "# CONFIG_MODULE_SIG_ALL is not set" >> $f
+            fi
+          done
+
+      - name: Export build vars
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+
+      # ---- Step 2: Make defconfig ----
+      - name: Make raphael defconfig
+        run: |
+          make O=out raphael_defconfig
+
+      # ---- Step 3: Force-disable in final .config (very important) ----
+      - name: Force disable module signature in final config
+        run: |
+          scripts/config --file out/.config \
+            -d MODULE_SIG \
+            -d MODULE_SIG_FORCE \
+            -d MODULE_SIG_ALL
+
+      - name: Verify signature options
+        run: |
+          grep -E "MODULE_SIG" out/.config || true
+
+      # ---- Step 4: Build kernel ----
+      - name: Build kernel
+        run: |
+          make -j$(nproc) O=out
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: raphael-kernel
+          path: |
+            out/arch/arm64/boot/Image*
+            out/arch/arm64/boot/dts/qcom/*.dtb
