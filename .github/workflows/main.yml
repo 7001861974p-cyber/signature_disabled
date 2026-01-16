@@ -1,4 +1,4 @@
-name: Raphael Kernel Build (No Signature + No KernelSU)
+name: Raphael Kernel Build (No Signature + KernelSU Stubs)
 
 on:
   workflow_dispatch:
@@ -31,13 +31,20 @@ jobs:
         run: |
           sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
 
-      # ---- Disable KernelSU hooks in source ----
-      - name: Disable KernelSU hooks in source
+      # ---- Add KernelSU stub functions to satisfy linker ----
+      - name: Add KernelSU stub functions
         run: |
-          grep -rl "ksu_handle_" . | while read f; do
-            echo "Patching $f"
-            sed -i 's/ksu_handle_/\/\/ ksu_handle_/g' "$f"
-          done
+          cat << 'EOF' > kernel/ksu_stub.c
+          #include <linux/types.h>
+
+          int ksu_handle_faccessat(void *a, void *b, void *c, void *d) { return 0; }
+          int ksu_handle_vfs_read(void *a, void *b, void *c, void *d) { return 0; }
+          int ksu_handle_stat(void *a, void *b, void *c) { return 0; }
+          int ksu_handle_execveat(void *a, void *b, void *c, void *d, void *e) { return 0; }
+          int ksu_handle_input_handle_event(void *a, void *b, void *c) { return 0; }
+          EOF
+
+          echo "obj-y += ksu_stub.o" >> kernel/Makefile
 
       # ---- Disable module signature verification ----
       - name: Disable module signature in defconfig
