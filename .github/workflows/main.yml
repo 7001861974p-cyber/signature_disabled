@@ -13,10 +13,6 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Force bash shell
-        run: |
-          echo "SHELL=/bin/bash" >> $GITHUB_ENV
-
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -30,18 +26,16 @@ jobs:
         with:
           max-size: 2G
 
-      # -------- FIX: Always fresh KernelSU --------
-      - name: Prepare KernelSU directory
+      # ---- FIX 1: Disable KernelSU include (prevents Kconfig error) ----
+      - name: Disable KernelSU from Kconfig
         run: |
-          rm -rf drivers/kernelsu
-          git clone https://github.com/tiann/KernelSU drivers/kernelsu
+          sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
 
-      # -------- Disable module signature in defconfigs --------
+      # ---- FIX 2: Disable module signature in defconfigs ----
       - name: Disable module signature in defconfig
         run: |
           for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
             if [ -f "$f" ]; then
-              echo "Patching $f"
               sed -i '/CONFIG_MODULE_SIG/d' $f
               sed -i '/CONFIG_MODULE_SIG_FORCE/d' $f
               sed -i '/CONFIG_MODULE_SIG_ALL/d' $f
@@ -57,12 +51,12 @@ jobs:
           echo "SUBARCH=arm64" >> $GITHUB_ENV
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
-      # -------- Make defconfig --------
+      # ---- Make defconfig ----
       - name: Make raphael defconfig
         run: |
           make O=out raphael_defconfig
 
-      # -------- Force-disable in final .config --------
+      # ---- Force-disable in final .config ----
       - name: Force disable module signature in final config
         run: |
           chmod +x scripts/config || true
@@ -76,7 +70,7 @@ jobs:
         run: |
           grep -E "MODULE_SIG" out/.config || true
 
-      # -------- Build kernel --------
+      # ---- Build kernel ----
       - name: Build kernel
         run: |
           make -j$(nproc) O=out
