@@ -1,4 +1,4 @@
-name: Raphael Kernel Build (Final Fixed)
+name: Raphael Kernel Build (ZIP Export)
 
 on:
   workflow_dispatch:
@@ -26,27 +26,25 @@ jobs:
         with:
           max-size: 2G
 
-      # ---------- Disable KernelSU Kconfig ----------
+      # -------- Disable KernelSU Kconfig --------
       - name: Disable KernelSU Kconfig include
         run: |
           sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
 
-      # ---------- Add KernelSU stub functions ----------
+      # -------- KernelSU stub functions --------
       - name: Add KernelSU stub functions
         run: |
           cat << 'EOF' > kernel/ksu_stub.c
           #include <linux/types.h>
-
           int ksu_handle_faccessat(void *a, void *b, void *c, void *d) { return 0; }
           int ksu_handle_vfs_read(void *a, void *b, void *c, void *d) { return 0; }
           int ksu_handle_stat(void *a, void *b, void *c) { return 0; }
           int ksu_handle_execveat(void *a, void *b, void *c, void *d, void *e) { return 0; }
           int ksu_handle_input_handle_event(void *a, void *b, void *c) { return 0; }
           EOF
-
           echo "obj-y += ksu_stub.o" >> kernel/Makefile
 
-      # ---------- Disable module signature verification ----------
+      # -------- Disable module signature --------
       - name: Disable module signature in defconfig
         run: |
           for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
@@ -60,12 +58,12 @@ jobs:
             fi
           done
 
-      # ---------- Clone Proton Clang ----------
+      # -------- Clone Proton Clang --------
       - name: Clone Proton Clang
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
 
-      # ---------- Export build environment ----------
+      # -------- Export env --------
       - name: Export build environment
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
@@ -82,12 +80,11 @@ jobs:
           echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
-      # ---------- Make defconfig ----------
+      # -------- Defconfig --------
       - name: Make raphael defconfig
         run: |
           make O=out raphael_defconfig
 
-      # ---------- Force disable signature in final config ----------
       - name: Force disable signature in final config
         run: |
           chmod +x scripts/config || true
@@ -97,11 +94,7 @@ jobs:
             -d MODULE_SIG_ALL
           make O=out olddefconfig
 
-      - name: Verify signature options
-        run: |
-          grep -E "MODULE_SIG" out/.config || true
-
-      # ---------- Build kernel ----------
+      # -------- Build --------
       - name: Build kernel
         run: |
           make -j$(nproc) O=out \
@@ -115,11 +108,18 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-      # ---------- Upload result ----------
-      - name: Upload kernel image
+      # -------- Package output --------
+      - name: Package kernel image
+        run: |
+          mkdir -p package
+          cp out/arch/arm64/boot/Image package/
+          cp out/arch/arm64/boot/dts/qcom/*.dtb package/
+          cd package
+          zip -r raphael-kernel.zip *
+
+      # -------- Upload ZIP --------
+      - name: Upload kernel zip
         uses: actions/upload-artifact@v4
         with:
-          name: raphael-kernel
-          path: |
-            out/arch/arm64/boot/Image*
-            out/arch/arm64/boot/dts/qcom/*.dtb
+          name: raphael-kernel-zip
+          path: package/raphael-kernel.zip
