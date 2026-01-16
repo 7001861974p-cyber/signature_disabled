@@ -30,14 +30,13 @@ jobs:
         with:
           max-size: 2G
 
-      # -------- FIX 1: KernelSU folder (prevents kconfig error) --------
-      - name: Clone KernelSU
+      # -------- FIX: Always fresh KernelSU --------
+      - name: Prepare KernelSU directory
         run: |
-          if [ ! -d drivers/kernelsu ]; then
-            git clone https://github.com/tiann/KernelSU drivers/kernelsu
-          fi
+          rm -rf drivers/kernelsu
+          git clone https://github.com/tiann/KernelSU drivers/kernelsu
 
-      # -------- FIX 2: Disable module signature in defconfigs --------
+      # -------- Disable module signature in defconfigs --------
       - name: Disable module signature in defconfig
         run: |
           for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
@@ -63,7 +62,7 @@ jobs:
         run: |
           make O=out raphael_defconfig
 
-      # -------- FIX 3: Force-disable in final .config --------
+      # -------- Force-disable in final .config --------
       - name: Force disable module signature in final config
         run: |
           chmod +x scripts/config || true
