@@ -1,4 +1,4 @@
-name: Raphael Kernel Build (No Module Signature)
+name: Raphael Kernel Build (No Signature + No KernelSU)
 
 on:
   workflow_dispatch:
@@ -26,12 +26,20 @@ jobs:
         with:
           max-size: 2G
 
-      # ---- FIX 1: Disable KernelSU include (avoid Kconfig error) ----
-      - name: Disable KernelSU from Kconfig
+      # ---- Disable KernelSU from Kconfig ----
+      - name: Disable KernelSU Kconfig include
         run: |
           sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
 
-      # ---- FIX 2: Disable module signature in defconfigs ----
+      # ---- Disable KernelSU hooks in source ----
+      - name: Disable KernelSU hooks in source
+        run: |
+          grep -rl "ksu_handle_" . | while read f; do
+            echo "Patching $f"
+            sed -i 's/ksu_handle_/\/\/ ksu_handle_/g' "$f"
+          done
+
+      # ---- Disable module signature verification ----
       - name: Disable module signature in defconfig
         run: |
           for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
@@ -45,12 +53,12 @@ jobs:
             fi
           done
 
-      # ---- FIX 3: Clone Proton Clang toolchain ----
+      # ---- Clone Proton Clang toolchain ----
       - name: Clone Proton Clang
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
 
-      - name: Export build vars
+      - name: Export build environment
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "SUBARCH=arm64" >> $GITHUB_ENV
@@ -65,8 +73,8 @@ jobs:
         run: |
           make O=out raphael_defconfig
 
-      # ---- Force-disable in final .config ----
-      - name: Force disable module signature in final config
+      # ---- Force disable signature in final config ----
+      - name: Force disable signature in final config
         run: |
           chmod +x scripts/config || true
           scripts/config --file out/.config \
