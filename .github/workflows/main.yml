@@ -26,7 +26,7 @@ jobs:
         with:
           max-size: 2G
 
-      # ---- FIX 1: Disable KernelSU include (prevents Kconfig error) ----
+      # ---- FIX 1: Disable KernelSU include (avoid Kconfig error) ----
       - name: Disable KernelSU from Kconfig
         run: |
           sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
@@ -45,10 +45,19 @@ jobs:
             fi
           done
 
+      # ---- FIX 3: Clone Proton Clang toolchain ----
+      - name: Clone Proton Clang
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+
       - name: Export build vars
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
       # ---- Make defconfig ----
@@ -73,7 +82,10 @@ jobs:
       # ---- Build kernel ----
       - name: Build kernel
         run: |
-          make -j$(nproc) O=out
+          make -j$(nproc) O=out \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
