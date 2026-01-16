@@ -1,9 +1,9 @@
-name: Raphael Kernel Build @XdaAbhi (No Module Signature)
+name: Raphael Kernel Build (No Module Signature)
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
   build:
@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Force bash shell
+        run: |
+          echo "SHELL=/bin/bash" >> $GITHUB_ENV
 
       - name: Install build dependencies
         run: |
@@ -26,7 +30,14 @@ jobs:
         with:
           max-size: 2G
 
-      # ---- Step 1: Patch defconfigs (both) ----
+      # -------- FIX 1: KernelSU folder (prevents kconfig error) --------
+      - name: Clone KernelSU
+        run: |
+          if [ ! -d drivers/kernelsu ]; then
+            git clone https://github.com/tiann/KernelSU drivers/kernelsu
+          fi
+
+      # -------- FIX 2: Disable module signature in defconfigs --------
       - name: Disable module signature in defconfig
         run: |
           for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
@@ -47,24 +58,26 @@ jobs:
           echo "SUBARCH=arm64" >> $GITHUB_ENV
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
-      # ---- Step 2: Make defconfig ----
+      # -------- Make defconfig --------
       - name: Make raphael defconfig
         run: |
           make O=out raphael_defconfig
 
-      # ---- Step 3: Force-disable in final .config (very important) ----
+      # -------- FIX 3: Force-disable in final .config --------
       - name: Force disable module signature in final config
         run: |
+          chmod +x scripts/config || true
           scripts/config --file out/.config \
             -d MODULE_SIG \
             -d MODULE_SIG_FORCE \
             -d MODULE_SIG_ALL
+          make O=out olddefconfig
 
       - name: Verify signature options
         run: |
           grep -E "MODULE_SIG" out/.config || true
 
-      # ---- Step 4: Build kernel ----
+      # -------- Build kernel --------
       - name: Build kernel
         run: |
           make -j$(nproc) O=out
