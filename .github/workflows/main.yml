@@ -1,4 +1,4 @@
-name: Build Kernel SD8150
+name: Auto Build Kernel SD8150
 
 on:
   push:
@@ -23,13 +23,8 @@ jobs:
             clang lld llvm \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      - name: Setup Proton Clang
-        run: |
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
-
       - name: Build Kernel
         run: |
-          export PATH=$(pwd)/clang/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
 
@@ -50,7 +45,7 @@ jobs:
           cp out/arch/arm64/boot/Image* release/ || true
           ls -lh release/
 
-      - name: Create GitHub Release (Image Only)
+      - name: Create GitHub Release (Image)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: auto-${{ github.run_number }}
