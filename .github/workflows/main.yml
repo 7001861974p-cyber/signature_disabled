@@ -1,4 +1,4 @@
-name: Auto Build Kernel SD8150
+name: Auto Build Kernel SD8150 (with KernelSU)
 
 on:
   push:
@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Dependencies
         run: |
@@ -21,7 +23,15 @@ jobs:
             bc bison flex build-essential \
             libssl-dev libelf-dev \
             clang lld llvm \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            git
+
+      - name: Setup KernelSU
+        run: |
+          if [ ! -d drivers/kernelsu ]; then
+            echo "Cloning KernelSU..."
+            git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
+          fi
 
       - name: Build Kernel
         run: |
@@ -54,6 +64,7 @@ jobs:
             Auto-built kernel image
             Device: SD8150
             Defconfig: sd8150_perf_defconfig
+            KernelSU: enabled
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
