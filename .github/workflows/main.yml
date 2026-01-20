@@ -1,4 +1,4 @@
-name: Raphael Kernel Build (Image + DTBO Release)
+name: Raphael Kernel Build (Direct Image + DTBO Release)
 
 on:
   workflow_dispatch:
@@ -19,9 +19,7 @@ jobs:
           sudo apt-get install -y \
             bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
             git gnupg gperf libncurses5-dev libssl-dev libelf-dev \
-            lzop python3 rsync unzip zip zstd \
-            clang lld llvm \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+            lzop python3 rsync unzip zip zstd
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1
@@ -129,7 +127,6 @@ jobs:
           tag_name: auto-${{ github.run_number }}
           name: Raphael Kernel Build ${{ github.run_number }}
           body: |
-            Device: Raphael
             Outputs:
             - Image
             - dtbo.img
