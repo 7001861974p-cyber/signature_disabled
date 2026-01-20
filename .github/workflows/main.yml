@@ -1,6 +1,9 @@
 name: Build Kernel SD8150
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -41,19 +44,20 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-      - name: Prepare Image
+      - name: Prepare Release Files
         run: |
           mkdir -p release
           cp out/arch/arm64/boot/Image* release/ || true
           ls -lh release/
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (Image Only)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Kernel Build ${{ github.run_number }}
+          tag_name: auto-${{ github.run_number }}
+          name: SD8150 Kernel Build ${{ github.run_number }}
           body: |
-            Auto-built kernel image for SD8150
+            Auto-built kernel image
+            Device: SD8150
             Defconfig: sd8150_perf_defconfig
           files: release/*
         env:
