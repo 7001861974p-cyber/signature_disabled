@@ -1,70 +1,141 @@
-name: Auto Build Kernel SD8150 (with KernelSU)
+name: Raphael Kernel Build (Image + DTBO Release)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Kernel Source
+      - name: Checkout source
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Install Dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bc bison flex build-essential \
-            libssl-dev libelf-dev \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf libncurses5-dev libssl-dev libelf-dev \
+            lzop python3 rsync unzip zip zstd \
             clang lld llvm \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            git
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      - name: Setup KernelSU
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          max-size: 2G
+
+      # -------- Disable KernelSU Kconfig --------
+      - name: Disable KernelSU Kconfig include
         run: |
-          if [ ! -d drivers/kernelsu ]; then
-            echo "Cloning KernelSU..."
-            git clone https://github.com/tiann/KernelSU.git drivers/kernelsu
-          fi
+          sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
 
-      - name: Build Kernel
+      # -------- KernelSU stub functions --------
+      - name: Add KernelSU stub functions
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
+          cat << 'EOF' > kernel/ksu_stub.c
+          #include <linux/types.h>
+          int ksu_handle_faccessat(void *a, void *b, void *c, void *d) { return 0; }
+          int ksu_handle_vfs_read(void *a, void *b, void *c, void *d) { return 0; }
+          int ksu_handle_stat(void *a, void *b, void *c) { return 0; }
+          int ksu_handle_execveat(void *a, void *b, void *c, void *d, void *e) { return 0; }
+          int ksu_handle_input_handle_event(void *a, void *b, void *c) { return 0; }
+          EOF
+          echo "obj-y += ksu_stub.o" >> kernel/Makefile
 
-          mkdir -p out
+      # -------- Disable module signature --------
+      - name: Disable module signature in defconfig
+        run: |
+          for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
+            if [ -f "$f" ]; then
+              sed -i '/CONFIG_MODULE_SIG/d' $f
+              sed -i '/CONFIG_MODULE_SIG_FORCE/d' $f
+              sed -i '/CONFIG_MODULE_SIG_ALL/d' $f
+              echo "# CONFIG_MODULE_SIG is not set" >> $f
+              echo "# CONFIG_MODULE_SIG_FORCE is not set" >> $f
+              echo "# CONFIG_MODULE_SIG_ALL is not set" >> $f
+            fi
+          done
 
-          make O=out sd8150_perf_defconfig
+      # -------- Clone Proton Clang --------
+      - name: Clone Proton Clang
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
 
+      # -------- Export env --------
+      - name: Export build environment
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "AR=llvm-ar" >> $GITHUB_ENV
+          echo "NM=llvm-nm" >> $GITHUB_ENV
+          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
+          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
+          echo "STRIP=llvm-strip" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+
+      # -------- Defconfig --------
+      - name: Make raphael defconfig
+        run: |
+          make O=out raphael_defconfig
+
+      - name: Force disable signature in final config
+        run: |
+          chmod +x scripts/config || true
+          scripts/config --file out/.config \
+            -d MODULE_SIG \
+            -d MODULE_SIG_FORCE \
+            -d MODULE_SIG_ALL
+          make O=out olddefconfig
+
+      # -------- Build --------
+      - name: Build kernel
+        run: |
           make -j$(nproc) O=out \
-            ARCH=arm64 \
             CC=clang \
-            LLVM=1 LLVM_IAS=1 \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-      - name: Prepare Release Files
+      # -------- Collect Image + DTBO --------
+      - name: Collect build outputs
         run: |
           mkdir -p release
-          cp out/arch/arm64/boot/Image* release/ || true
+          cp out/arch/arm64/boot/Image release/
+
+          if [ -f out/arch/arm64/boot/dtbo.img ]; then
+            cp out/arch/arm64/boot/dtbo.img release/
+          fi
+
           ls -lh release/
 
-      - name: Create GitHub Release (Image)
+      # -------- GitHub Release --------
+      - name: Create GitHub Release (Image + DTBO)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: auto-${{ github.run_number }}
-          name: SD8150 Kernel Build ${{ github.run_number }}
+          name: Raphael Kernel Build ${{ github.run_number }}
           body: |
-            Auto-built kernel image
-            Device: SD8150
-            Defconfig: sd8150_perf_defconfig
-            KernelSU: enabled
-          files: release/*
+            Device: Raphael
+            Outputs:
+            - Image
+            - dtbo.img
+            Module signature: disabled
+          files: |
+            release/Image
+            release/dtbo.img
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
