@@ -1,125 +1,60 @@
-name: Raphael Kernel Build (ZIP Export)
+name: Build Kernel SD8150
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, master ]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
-            git gnupg gperf libncurses5-dev libssl-dev libelf-dev \
-            lzop python3 rsync unzip zip zstd
+            bc bison flex build-essential \
+            libssl-dev libelf-dev \
+            clang lld llvm \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          max-size: 2G
-
-      # -------- Disable KernelSU Kconfig --------
-      - name: Disable KernelSU Kconfig include
-        run: |
-          sed -i 's|source "drivers/kernelsu/Kconfig"|# source "drivers/kernelsu/Kconfig"|g' drivers/Kconfig || true
-
-      # -------- KernelSU stub functions --------
-      - name: Add KernelSU stub functions
-        run: |
-          cat << 'EOF' > kernel/ksu_stub.c
-          #include <linux/types.h>
-          int ksu_handle_faccessat(void *a, void *b, void *c, void *d) { return 0; }
-          int ksu_handle_vfs_read(void *a, void *b, void *c, void *d) { return 0; }
-          int ksu_handle_stat(void *a, void *b, void *c) { return 0; }
-          int ksu_handle_execveat(void *a, void *b, void *c, void *d, void *e) { return 0; }
-          int ksu_handle_input_handle_event(void *a, void *b, void *c) { return 0; }
-          EOF
-          echo "obj-y += ksu_stub.o" >> kernel/Makefile
-
-      # -------- Disable module signature --------
-      - name: Disable module signature in defconfig
-        run: |
-          for f in arch/arm64/configs/raphael_defconfig arch/arm64/configs/raphael_user_defconfig; do
-            if [ -f "$f" ]; then
-              sed -i '/CONFIG_MODULE_SIG/d' $f
-              sed -i '/CONFIG_MODULE_SIG_FORCE/d' $f
-              sed -i '/CONFIG_MODULE_SIG_ALL/d' $f
-              echo "# CONFIG_MODULE_SIG is not set" >> $f
-              echo "# CONFIG_MODULE_SIG_FORCE is not set" >> $f
-              echo "# CONFIG_MODULE_SIG_ALL is not set" >> $f
-            fi
-          done
-
-      # -------- Clone Proton Clang --------
-      - name: Clone Proton Clang
+      - name: Setup Proton Clang
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
 
-      # -------- Export env --------
-      - name: Export build environment
+      - name: Build Kernel
         run: |
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "SUBARCH=arm64" >> $GITHUB_ENV
-          echo "PATH=$PWD/clang/bin:$PATH" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
-          echo "AR=llvm-ar" >> $GITHUB_ENV
-          echo "NM=llvm-nm" >> $GITHUB_ENV
-          echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
-          echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
-          echo "STRIP=llvm-strip" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          export PATH=$(pwd)/clang/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
 
-      # -------- Defconfig --------
-      - name: Make raphael defconfig
-        run: |
-          make O=out raphael_defconfig
+          mkdir -p out
 
-      - name: Force disable signature in final config
-        run: |
-          chmod +x scripts/config || true
-          scripts/config --file out/.config \
-            -d MODULE_SIG \
-            -d MODULE_SIG_FORCE \
-            -d MODULE_SIG_ALL
-          make O=out olddefconfig
+          make O=out sd8150_perf_defconfig
 
-      # -------- Build --------
-      - name: Build kernel
-        run: |
           make -j$(nproc) O=out \
+            ARCH=arm64 \
             CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
+            LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-      # -------- Package output --------
-      - name: Package kernel image
+      - name: Prepare Image
         run: |
-          mkdir -p package
-          cp out/arch/arm64/boot/Image package/
-          cp out/arch/arm64/boot/dts/qcom/*.dtb package/
-          cd package
-          zip -r raphael-kernel.zip *
+          mkdir -p release
+          cp out/arch/arm64/boot/Image* release/ || true
+          ls -lh release/
 
-      # -------- Upload ZIP --------
-      - name: Upload kernel zip
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: raphael-kernel-zip
-          path: package/raphael-kernel.zip
+          tag_name: build-${{ github.run_number }}
+          name: Kernel Build ${{ github.run_number }}
+          body: |
+            Auto-built kernel image for SD8150
+            Defconfig: sd8150_perf_defconfig
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
